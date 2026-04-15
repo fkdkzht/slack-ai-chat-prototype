@@ -13,6 +13,7 @@ __pycache__/
 .mypy_cache/
 coverage/
 .coverage
+*.egg-info/
 
 .worktrees/
 
