@@ -4,8 +4,11 @@ import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
+from app.cleansing.gemini_filter import run_gemini_filter
+from app.exports.sheets_webhook import post_to_sheets_webhook
 from app.llm.gemini import generate_reply
 from app.logging_ import configure_app_logging, slack_ingest_log
 from app.orchestrator import handle_user_message
@@ -59,12 +62,58 @@ def _process_slack_message_event(
         session_id = ev.session_id
         state = store.get(session_id) or store.new_state(session_id)
 
+        chat_model = settings.gemini_chat_model if settings.demo_mode else settings.gemini_model
+
         def gen_fn(messages: list[dict[str, str]]) -> str:
-            return generate_reply(
-                api_key=settings.gemini_api_key,
-                model=settings.gemini_model,
-                messages=messages,
-            )
+            return generate_reply(api_key=settings.gemini_api_key, model=chat_model, messages=messages)
+
+        filter_fn = None
+        export_hook = None
+        if settings.demo_mode:
+            def _filter_fn(raw_text: str) -> dict:
+                fr = run_gemini_filter(
+                    api_key=settings.gemini_api_key,
+                    model=settings.gemini_filter_model,
+                    raw_text=raw_text,
+                )
+                return {
+                    "sanitized_text": fr.sanitized_text,
+                    "pii_items": [{"type": it.type, "value": it.value, "token": it.token} for it in fr.pii_items],
+                    "summary": fr.summary,
+                }
+
+            filter_fn = _filter_fn
+
+            def _export_hook(out: dict) -> None:
+                if not settings.sheets_webhook_url:
+                    raise ValueError("sheets_webhook_url is required in demo mode")
+                ts = str(out.get("ts") or "")
+                sanitized_text = str(out.get("sanitized_text") or "")
+                pii_summary_json = str(out.get("pii_summary_json") or "")
+                pii_items = list(out.get("pii_items") or [])
+                payload = {
+                    "message_log": {
+                        "ts": ts,
+                        "event_id": event_id,
+                        "sanitized_text": sanitized_text,
+                        "pii_summary_json": pii_summary_json,
+                    },
+                    "pii_dictionary": [
+                        {
+                            "ts": ts,
+                            "event_id": event_id,
+                            "pii_type": str(it.get("type") or ""),
+                            "token": str(it.get("token") or ""),
+                            "value": str(it.get("value") or ""),
+                        }
+                        for it in pii_items
+                        if isinstance(it, dict)
+                    ],
+                }
+                with httpx.Client() as client:
+                    post_to_sheets_webhook(client=client, webhook_url=settings.sheets_webhook_url, payload=payload)
+
+            export_hook = _export_hook
 
         state, mask_summary, restored = handle_user_message(
             state=state,
@@ -72,6 +121,8 @@ def _process_slack_message_event(
             user_ts=ev.ts,
             generate_reply_fn=gen_fn,
             ttl_hours=settings.session_ttl_hours,
+            filter_fn=filter_fn,
+            export_hook=export_hook,
         )
         store.upsert(state)
 

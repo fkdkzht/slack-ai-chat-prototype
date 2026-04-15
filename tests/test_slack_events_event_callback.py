@@ -165,6 +165,100 @@ def test_slack_duplicate_event_id_does_not_post_twice() -> None:
     assert len(posted) == 1
 
 
+def test_slack_events_demo_mode_filters_and_exports_and_chat_sees_sanitized_only() -> None:
+    from app.main import app, get_session_store
+    from app.cleansing.gemini_filter import FilterResult, PiiItem
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        slack_signing_secret="x",
+        slack_bot_token="x",
+        gcp_project_id="x",
+        gemini_api_key="x",
+        demo_mode=True,
+        gemini_filter_model="filter-model",
+        gemini_chat_model="chat-model",
+        sheets_webhook_url="https://example.invalid/webhook",
+    )
+    fake_store = _FakeSessionStore()
+    app.dependency_overrides[get_session_store] = lambda: fake_store
+
+    client = TestClient(app)
+    payload = {
+        "type": "event_callback",
+        "event_id": "EvDEMO1",
+        "authorizations": [{"user_id": "UBOT", "is_bot": True}],
+        "event": {
+            "type": "message",
+            "user": "U1",
+            "channel": "C1",
+            "text": "Email me at alice@example.com",
+            "ts": "1700000000.0002",
+        },
+    }
+    body = json.dumps(payload).encode("utf-8")
+    ts = str(int(time.time()))
+    sig = _sign("x", ts, body)
+
+    import app.main as main_mod
+
+    sheets_posts: list[dict] = []
+    chat_calls: list[dict] = []
+
+    def fake_run_gemini_filter(*, api_key: str, model: str, raw_text: str):
+        assert raw_text == "Email me at alice@example.com"
+        return FilterResult(
+            sanitized_text="hi <EMAIL_1>",
+            pii_items=[PiiItem(type="EMAIL", value="alice@example.com", token="<EMAIL_1>")],
+            summary={"EMAIL": 1},
+        )
+
+    def fake_post_to_sheets_webhook(*, client, webhook_url: str, payload: dict) -> None:
+        sheets_posts.append({"webhook_url": webhook_url, "payload": payload})
+
+    def fake_generate_reply(*, api_key: str, model: str, messages: list[dict[str, str]]) -> str:
+        chat_calls.append({"api_key": api_key, "model": model, "messages": messages})
+        return "ok"
+
+    main_mod.run_gemini_filter = fake_run_gemini_filter
+    main_mod.post_to_sheets_webhook = fake_post_to_sheets_webhook
+    main_mod.generate_reply = fake_generate_reply
+    main_mod.post_thread_reply = lambda **kwargs: None
+
+    res = client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": ts,
+            "X-Slack-Signature": sig,
+        },
+    )
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+
+    assert len(sheets_posts) == 1
+    posted_payload = sheets_posts[0]["payload"]
+    assert "message_log" in posted_payload
+    assert "pii_dictionary" in posted_payload
+    assert posted_payload["message_log"]["event_id"] == "EvDEMO1"
+    assert posted_payload["message_log"]["sanitized_text"] == "hi <EMAIL_1>"
+    assert posted_payload["pii_dictionary"] == [
+        {
+            "ts": "1700000000.0002",
+            "event_id": "EvDEMO1",
+            "pii_type": "EMAIL",
+            "token": "<EMAIL_1>",
+            "value": "alice@example.com",
+        }
+    ]
+
+    assert len(chat_calls) == 1
+    msg_texts = " ".join(m.get("content", "") for m in chat_calls[0]["messages"])
+    assert "<EMAIL_1>" in msg_texts
+    assert "alice@example.com" not in msg_texts
+    assert chat_calls[0]["model"] == "chat-model"
+
+
 def test_slack_skips_message_from_bot_user() -> None:
     from app.main import app, get_session_store
 
