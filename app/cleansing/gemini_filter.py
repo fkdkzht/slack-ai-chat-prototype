@@ -56,7 +56,7 @@ def parse_filter_json(text: str) -> FilterResult:
     return FilterResult(sanitized_text=sanitized_text, pii_items=pii_items, summary=summary_int)
 
 
-def run_gemini_filter(*, api_key: str, model: str, raw_text: str) -> FilterResult:
+def run_gemini_filter(api_key: str, model: str, raw_text: str) -> FilterResult:
     client = genai.Client(api_key=api_key)
     prompt = (
         "You are a PII redaction filter.\n"
