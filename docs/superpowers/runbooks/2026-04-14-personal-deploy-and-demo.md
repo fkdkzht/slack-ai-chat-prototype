@@ -135,6 +135,8 @@ export REGION="asia-northeast1"
 
 > アプリ実装が入ったら、リポジトリルートで実行。
 
+**デモ安定化メモ（重要）:** 本アプリは Slack の再送を避けるために **イベント受信を即 2xx で ack** し、重い処理は **バックグラウンド**で継続する。Cloud Run はアイドル時に CPU が絞られることがあるため、**デモでは `--no-cpu-throttling` を付ける**と、返信作成などの処理が **待機中でも継続しやすく**なる（その分、アイドル時も CPU 課金が発生しやすいので、デモ用途に限定して使う）。
+
 ```bash
 gcloud run deploy slack-ai-chat-prototype \
   --source . \
@@ -142,6 +144,7 @@ gcloud run deploy slack-ai-chat-prototype \
   --allow-unauthenticated \
   --memory=512Mi \
   --cpu=1 \
+  --no-cpu-throttling \
   --min-instances=0 \
   --max-instances=2 \
   --set-env-vars="APP_ENV=prod,GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=default,SESSION_TTL_HOURS=24,GEMINI_MODEL=gemini-2.5-flash" \
