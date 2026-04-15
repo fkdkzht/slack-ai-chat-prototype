@@ -9,6 +9,9 @@ COPY app /app/app
 
 RUN pip install --no-cache-dir .
 
+# Bake spaCy model into the image so Cloud Run cold starts do not download at runtime.
+RUN python -m spacy download en_core_web_sm
+
 ENV PORT=8080
 EXPOSE 8080
 
