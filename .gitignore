@@ -17,3 +17,7 @@ coverage/
 
 .worktrees/
 
+# Google Apps Script (clasp)
+.clasp.json
+.clasp-*.json
+
