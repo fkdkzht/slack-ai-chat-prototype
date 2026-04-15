@@ -144,7 +144,7 @@ gcloud run deploy slack-ai-chat-prototype \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="APP_ENV=prod,GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=(default),SESSION_TTL_HOURS=24,GEMINI_MODEL=gemini-2.5-flash" \
+  --set-env-vars="APP_ENV=prod,GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=default,SESSION_TTL_HOURS=24,GEMINI_MODEL=gemini-2.5-flash" \
   --set-secrets="SLACK_SIGNING_SECRET=slack_signing_secret:latest,SLACK_BOT_TOKEN=slack_bot_token:latest,GEMINI_API_KEY=gemini_api_key:latest"
 ```
 

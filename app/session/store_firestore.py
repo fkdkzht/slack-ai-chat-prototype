@@ -11,9 +11,19 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _firestore_database_id(database: str) -> str:
+    """Console shows (default); Firestore API expects the database id ``default``."""
+    if database == "(default)":
+        return "default"
+    return database
+
+
 class FirestoreSessionStore:
     def __init__(self, *, project_id: str, database: str, ttl_hours: int) -> None:
-        self._client = firestore.Client(project=project_id, database=database)
+        self._client = firestore.Client(
+            project=project_id,
+            database=_firestore_database_id(database),
+        )
         self._ttl_hours = ttl_hours
 
     def get(self, session_id: str) -> SessionState | None:

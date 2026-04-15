@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     slack_bot_token: str
 
     gcp_project_id: str
-    firestore_database: str = "(default)"
+    firestore_database: str = "default"
     session_ttl_hours: int = 24
 
     gemini_api_key: str

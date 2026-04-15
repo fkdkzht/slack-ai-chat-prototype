@@ -8,7 +8,7 @@ def test_settings_has_defaults() -> None:
         gcp_project_id="x",
         gemini_api_key="x",
     )
-    assert s.firestore_database == "(default)"
+    assert s.firestore_database == "default"
     assert s.session_ttl_hours == 24
     assert s.gemini_model
 
