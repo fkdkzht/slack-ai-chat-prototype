@@ -22,9 +22,19 @@ def get_session_store(settings: Settings = Depends(get_settings)) -> FirestoreSe
     return _session_store(settings.gcp_project_id, settings.firestore_database, settings.session_ttl_hours)
 
 
+def _health_payload(_settings: Settings) -> dict:
+    return {"ok": True}
+
+
 @app.get("/healthz")
 def healthz(_settings: Settings = Depends(get_settings)) -> dict:
-    return {"ok": True}
+    return _health_payload(_settings)
+
+
+@app.get("/health")
+def health(_settings: Settings = Depends(get_settings)) -> dict:
+    """Use this path for probes on Cloud Run: the default *.run.app edge may intercept ``/healthz`` (lowercase)."""
+    return _health_payload(_settings)
 
 
 @app.post("/slack/events")

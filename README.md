@@ -46,7 +46,7 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8080
 ```
 
-- ヘルスチェック: `GET http://127.0.0.1:8080/healthz`
+- ヘルスチェック: `GET /health`（推奨）または `GET /healthz`。**Cloud Run の `*.run.app` では小文字の `/healthz` がエッジで 404 になることがある**ため、本番相当の確認は `/health` を使う。
 - Slack Events URL は `POST /slack/events`（署名検証あり）。外向き URL が必要なので、開発時は ngrok 等で公開する。
 
 ### テスト
