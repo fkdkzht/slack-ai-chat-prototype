@@ -23,6 +23,22 @@ def test_parse_filter_json_rejects_missing_sanitized_text() -> None:
         parse_filter_json('{"pii_items": [], "summary": {}}')
 
 
+def test_parse_filter_json_rejects_non_object_json() -> None:
+    with pytest.raises(ValueError):
+        parse_filter_json("[]")
+
+
+def test_parse_filter_json_accepts_fenced_json() -> None:
+    raw = {
+        "sanitized_text": "Hello <EMAIL_1>",
+        "pii_items": [{"type": "EMAIL", "value": "alice@example.com", "token": "<EMAIL_1>"}],
+        "summary": {"EMAIL": 1},
+    }
+    fenced = f"```json\n{json.dumps(raw)}\n```"
+    r = parse_filter_json(fenced)
+    assert r.sanitized_text == "Hello <EMAIL_1>"
+
+
 def test_run_gemini_filter_accepts_positional_args(monkeypatch: pytest.MonkeyPatch) -> None:
     class _DummyResponse:
         def __init__(self, text: str) -> None:

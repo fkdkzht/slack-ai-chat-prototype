@@ -21,10 +21,22 @@ class FilterResult:
 
 
 def parse_filter_json(text: str) -> FilterResult:
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            for i in range(1, len(lines)):
+                if lines[i].startswith("```"):
+                    text = "\n".join(lines[1:i]).strip()
+                    break
+
     try:
         obj = json.loads(text)
     except json.JSONDecodeError as e:
         raise ValueError("filter returned non-json") from e
+
+    if not isinstance(obj, dict):
+        raise ValueError("filter returned non-object json")
 
     sanitized_text = obj.get("sanitized_text")
     if not isinstance(sanitized_text, str) or not sanitized_text:
