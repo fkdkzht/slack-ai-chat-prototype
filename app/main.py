@@ -1,13 +1,25 @@
+from functools import lru_cache
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
+from app.llm.gemini import generate_reply
+from app.orchestrator import handle_user_message
 from app.settings import Settings, get_settings
-from app.cleansing.demask import demask_text_policy_p0
-from app.cleansing.presidio import cleanse_text_presidio
+from app.session.store_firestore import FirestoreSessionStore
 from app.slack.events import parse_message_event
 from app.slack.reply import format_first_reply, post_thread_reply
 from app.slack.verify import SlackVerificationError, verify_slack_request
 
 app = FastAPI()
+
+
+@lru_cache(maxsize=16)
+def _session_store(project_id: str, database: str, ttl_hours: int) -> FirestoreSessionStore:
+    return FirestoreSessionStore(project_id=project_id, database=database, ttl_hours=ttl_hours)
+
+
+def get_session_store(settings: Settings = Depends(get_settings)) -> FirestoreSessionStore:
+    return _session_store(settings.gcp_project_id, settings.firestore_database, settings.session_ttl_hours)
 
 
 @app.get("/healthz")
@@ -19,6 +31,7 @@ def healthz(_settings: Settings = Depends(get_settings)) -> dict:
 async def slack_events(
     request: Request,
     settings: Settings = Depends(get_settings),
+    store: FirestoreSessionStore = Depends(get_session_store),
     x_slack_request_timestamp: str = Header(alias="X-Slack-Request-Timestamp"),
     x_slack_signature: str = Header(alias="X-Slack-Signature"),
 ) -> dict:
@@ -45,16 +58,30 @@ async def slack_events(
         return {"ok": True}
 
     ev = parse_message_event(payload)
-    cleansing = cleanse_text_presidio(ev.text)
+    session_id = ev.session_id
+    state = store.get(session_id) or store.new_state(session_id)
 
-    llm_text = f"(sanitized) {cleansing.sanitized_text}"
-    restored = demask_text_policy_p0(llm_text, cleansing.mask_map)
+    def gen_fn(messages: list[dict[str, str]]) -> str:
+        return generate_reply(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_model,
+            messages=messages,
+        )
 
-    summary_parts = [f"{k} x{v}" for k, v in sorted(cleansing.mask_summary.items())]
+    state, mask_summary, restored = handle_user_message(
+        state=state,
+        user_text=ev.text,
+        user_ts=ev.ts,
+        generate_reply_fn=gen_fn,
+        ttl_hours=settings.session_ttl_hours,
+    )
+    store.upsert(state)
+
+    summary_parts = [f"{k} x{v}" for k, v in sorted(mask_summary.items())]
     summary = "Masked: " + (", ".join(summary_parts) if summary_parts else "NONE")
 
     thread_ts = ev.thread_ts or ev.ts
-    reply_text = format_first_reply(mask_summary=cleansing.mask_summary, answer_text=restored)
+    reply_text = format_first_reply(mask_summary=mask_summary, answer_text=restored)
     post_thread_reply(
         bot_token=settings.slack_bot_token,
         channel_id=ev.channel_id,
@@ -66,7 +93,7 @@ async def slack_events(
         "ok": True,
         "debug": {
             "session_id": ev.session_id,
-            "mask_summary": cleansing.mask_summary,
+            "mask_summary": mask_summary,
             "mask_summary_text": summary,
             "reply_text": restored,
             "posted": True,

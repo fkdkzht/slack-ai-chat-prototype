@@ -2,9 +2,11 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from app.session.models import SessionState
 from app.settings import Settings, get_settings
 
 
@@ -14,8 +16,28 @@ def _sign(secret: str, timestamp: str, body: bytes) -> str:
     return "v0=" + digest
 
 
+class _FakeSessionStore:
+    def __init__(self) -> None:
+        self._docs: dict[str, SessionState] = {}
+
+    def get(self, session_id: str) -> SessionState | None:
+        return self._docs.get(session_id)
+
+    def upsert(self, state: SessionState) -> None:
+        self._docs[state.session_id] = state
+
+    def new_state(self, session_id: str) -> SessionState:
+        now = datetime.now(UTC)
+        return SessionState(
+            session_id=session_id,
+            created_at=now,
+            updated_at=now,
+            ttl_at=now + timedelta(hours=24),
+        )
+
+
 def test_slack_events_event_callback_message_returns_debug_reply() -> None:
-    from app.main import app
+    from app.main import app, get_session_store
 
     app.dependency_overrides[get_settings] = lambda: Settings(
         slack_signing_secret="x",
@@ -23,6 +45,8 @@ def test_slack_events_event_callback_message_returns_debug_reply() -> None:
         gcp_project_id="x",
         gemini_api_key="x",
     )
+    fake_store = _FakeSessionStore()
+    app.dependency_overrides[get_session_store] = lambda: fake_store
 
     client = TestClient(app)
     payload = {
@@ -49,7 +73,11 @@ def test_slack_events_event_callback_message_returns_debug_reply() -> None:
         posted["thread_ts"] = thread_ts
         posted["text"] = text
 
+    def fake_generate_reply(*, api_key: str, model: str, messages: list[dict[str, str]]) -> str:
+        return f"(sanitized) {messages[-1]['content']}"
+
     main_mod.post_thread_reply = fake_post_thread_reply
+    main_mod.generate_reply = fake_generate_reply
 
     res = client.post(
         "/slack/events",
