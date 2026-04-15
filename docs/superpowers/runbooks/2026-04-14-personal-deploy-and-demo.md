@@ -150,6 +150,10 @@ gcloud run deploy slack-ai-chat-prototype \
 
 デプロイ後、表示される **Service URL**（例: `https://...run.app`）をメモする。
 
+**Slack Events の注意:** Slack は **数秒以内に HTTP 2xx** が返らないと **同じイベントを再送**し、結果として **同じ DM に返信が複数**出ることがある。本アプリは **`event_callback` を即 `{"ok":true}` で応答**し、重い処理はバックグラウンドで実行する。
+
+**緊急停止（返信が止まらないとき）:** Slack API の **App 管理 → Event Subscriptions をオフ**にすると、Cloud Run へイベントが飛ばなくなり即座に止まる（アプリ設定側のスイッチ）。
+
 ---
 
 ## 6. Slack App 作成（Events API / DM）

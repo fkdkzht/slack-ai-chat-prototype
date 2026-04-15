@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 
 from app.session.models import SessionState
@@ -46,4 +47,15 @@ class FirestoreSessionStore:
             updated_at=now,
             ttl_at=now + timedelta(hours=self._ttl_hours),
         )
+
+    def try_claim_slack_event_delivery(self, event_id: str) -> bool:
+        """Return True if this is the first time we see ``event_id`` (Slack envelope id)."""
+        if not event_id:
+            return True
+        ref = self._client.collection("slack_event_deliveries").document(event_id)
+        try:
+            ref.create({"created": firestore.SERVER_TIMESTAMP})
+            return True
+        except AlreadyExists:
+            return False
 

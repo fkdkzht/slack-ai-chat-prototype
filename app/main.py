@@ -1,6 +1,7 @@
+import json
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
 from app.llm.gemini import generate_reply
 from app.orchestrator import handle_user_message
@@ -22,51 +23,23 @@ def get_session_store(settings: Settings = Depends(get_settings)) -> FirestoreSe
     return _session_store(settings.gcp_project_id, settings.firestore_database, settings.session_ttl_hours)
 
 
-def _health_payload(_settings: Settings) -> dict:
-    return {"ok": True}
+def _slack_message_is_bot_traffic(payload: dict, event: dict) -> bool:
+    if event.get("bot_id"):
+        return True
+    uid = event.get("user")
+    if not uid:
+        return True
+    for auth in payload.get("authorizations") or []:
+        if auth.get("is_bot") and auth.get("user_id") == uid:
+            return True
+    return False
 
 
-@app.get("/healthz")
-def healthz(_settings: Settings = Depends(get_settings)) -> dict:
-    return _health_payload(_settings)
-
-
-@app.get("/health")
-def health(_settings: Settings = Depends(get_settings)) -> dict:
-    """Use this path for probes on Cloud Run: the default *.run.app edge may intercept ``/healthz`` (lowercase)."""
-    return _health_payload(_settings)
-
-
-@app.post("/slack/events")
-async def slack_events(
-    request: Request,
-    settings: Settings = Depends(get_settings),
-    store: FirestoreSessionStore = Depends(get_session_store),
-    x_slack_request_timestamp: str = Header(alias="X-Slack-Request-Timestamp"),
-    x_slack_signature: str = Header(alias="X-Slack-Signature"),
-) -> dict:
-    body = await request.body()
-    try:
-        verify_slack_request(
-            signing_secret=settings.slack_signing_secret,
-            timestamp=x_slack_request_timestamp,
-            signature=x_slack_signature,
-            body=body,
-        )
-    except SlackVerificationError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
-
-    payload = await request.json()
-
-    if payload.get("type") == "url_verification":
-        return {"challenge": payload["challenge"]}
-
-    if payload.get("type") != "event_callback":
-        return {"ok": True}
-
-    if payload.get("event", {}).get("type") != "message":
-        return {"ok": True}
-
+def _process_slack_message_event(
+    payload: dict,
+    settings: Settings,
+    store: FirestoreSessionStore,
+) -> None:
     ev = parse_message_event(payload)
     session_id = ev.session_id
     state = store.get(session_id) or store.new_state(session_id)
@@ -87,9 +60,6 @@ async def slack_events(
     )
     store.upsert(state)
 
-    summary_parts = [f"{k} x{v}" for k, v in sorted(mask_summary.items())]
-    summary = "Masked: " + (", ".join(summary_parts) if summary_parts else "NONE")
-
     thread_ts = ev.thread_ts or ev.ts
     reply_text = format_first_reply(mask_summary=mask_summary, answer_text=restored)
     post_thread_reply(
@@ -99,14 +69,69 @@ async def slack_events(
         text=reply_text,
     )
 
-    return {
-        "ok": True,
-        "debug": {
-            "session_id": ev.session_id,
-            "mask_summary": mask_summary,
-            "mask_summary_text": summary,
-            "reply_text": restored,
-            "posted": True,
-        },
-    }
+
+def _health_payload(_settings: Settings) -> dict:
+    return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz(_settings: Settings = Depends(get_settings)) -> dict:
+    return _health_payload(_settings)
+
+
+@app.get("/health")
+def health(_settings: Settings = Depends(get_settings)) -> dict:
+    """Use this path for probes on Cloud Run: the default *.run.app edge may intercept ``/healthz`` (lowercase)."""
+    return _health_payload(_settings)
+
+
+@app.post("/slack/events")
+async def slack_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+    store: FirestoreSessionStore = Depends(get_session_store),
+    x_slack_request_timestamp: str = Header(alias="X-Slack-Request-Timestamp"),
+    x_slack_signature: str = Header(alias="X-Slack-Signature"),
+) -> dict:
+    body = await request.body()
+    try:
+        verify_slack_request(
+            signing_secret=settings.slack_signing_secret,
+            timestamp=x_slack_request_timestamp,
+            signature=x_slack_signature,
+            body=body,
+        )
+    except SlackVerificationError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail="invalid json") from e
+
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload["challenge"]}
+
+    if payload.get("type") != "event_callback":
+        return {"ok": True}
+
+    event = payload.get("event", {})
+    if event.get("type") != "message":
+        return {"ok": True}
+    if not event.get("user"):
+        return {"ok": True}
+    # Only plain user messages (Slack omits subtype). Anything else includes bot/system events.
+    if event.get("subtype") not in (None, ""):
+        return {"ok": True}
+    if _slack_message_is_bot_traffic(payload, event):
+        return {"ok": True}
+
+    delivery_id = str(payload.get("event_id") or "")
+    if not store.try_claim_slack_event_delivery(delivery_id):
+        return {"ok": True}
+
+    # Slack retries if we do not respond with HTTP 2xx within ~3s; ack first, then process.
+    background_tasks.add_task(_process_slack_message_event, payload, settings, store)
+    return {"ok": True}
 
