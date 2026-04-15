@@ -18,15 +18,15 @@
 
 ### 1.1 Google Cloud CLI（必須）
 
-1) `gcloud` をインストール  
-2) ログイン
+1. `gcloud` をインストール  
+2. ログイン
 
 ```bash
 gcloud auth login
 gcloud auth application-default login
 ```
 
-3) 課金アカウントとプロジェクト確認
+1. 課金アカウントとプロジェクト確認
 
 ```bash
 gcloud billing accounts list
@@ -75,6 +75,7 @@ gcloud services enable \
 ### 3.1 Firestoreデータベース作成（Native mode / Tokyo）
 
 UI（推奨）:
+
 - Google Cloud Console → Firestore → データベースを作成
 - **Native mode**
 - **Location: `asia-northeast1 (Tokyo)`**
@@ -84,6 +85,7 @@ UI（推奨）:
 アプリ側でセッションドキュメントに `ttl_at`（timestamp）を保存し、Firestore TTL で削除する。
 
 制約メモ:
+
 - TTL削除は即時ではなく、期限後に遅延があり得る
 - TTLはサブコレクションを自動削除しない（本プロトタイプはサブコレクションを作らない設計にする）
 
@@ -100,6 +102,7 @@ gcloud firestore fields ttls update ttl_at \
 ## 4. Secret Manager にシークレット登録
 
 登録するシークレット:
+
 - `slack_signing_secret`
 - `slack_bot_token`
 - `gemini_api_key`
@@ -152,18 +155,19 @@ gcloud run deploy slack-ai-chat-prototype \
 ## 6. Slack App 作成（Events API / DM）
 
 UI（最短）:
-1) Slack API → “Create New App”
-2) **Bot Token Scopes** を追加（最低限）
-   - `chat:write`
-   - `im:history`（DM受信に必要。実際に必要なイベントに応じて調整）
-3) “Event Subscriptions” を Enable
-4) Request URL に Cloud Run の URL を入れる
-   - 例: `https://<service-url>/slack/events`
-5) Subscribe to bot events
-   - `message.im`（DMメッセージ）
-6) “Install to Workspace”
-7) “Basic Information” から **Signing Secret** を取得
-8) “OAuth & Permissions” から **Bot User OAuth Token**（`xoxb-...`）を取得
+
+1. Slack API → “Create New App”
+2. **Bot Token Scopes** を追加（最低限）
+  - `chat:write`
+  - `im:history`（DM受信に必要。実際に必要なイベントに応じて調整）
+3. “Event Subscriptions” を Enable
+4. Request URL に Cloud Run の URL を入れる
+  - 例: `https://<service-url>/slack/events`
+5. Subscribe to bot events
+  - `message.im`（DMメッセージ）
+6. “Install to Workspace”
+7. “Basic Information” から **Signing Secret** を取得
+8. “OAuth & Permissions” から **Bot User OAuth Token**（`xoxb-...`）を取得
 
 上記 7) 8) を Secret Manager に登録（Runbook 4章）
 
@@ -188,4 +192,28 @@ UI（最短）:
 - **UIが確実**
   - Firestore DB 作成（Tokyo指定）
   - Slack App作成・インストール（最初はUI推奨）
+
+---
+
+## 9. Secret Manager: グローバル vs リージョン（プロトタイプと本番の方針メモ）
+
+### 9.1 リージョンシークレットの仕様（別リソース構成）
+
+Secret Manager の **リージョンシークレット**は、グローバル（自動レプリケーション）のシークレットとは **リソース階層が異なる**（例: `projects/<番号>/locations/<リージョン>/secrets/<ID>`）。仕様の一次情報は次を参照する。
+
+- [リージョン シークレットの作成（公式）](https://docs.cloud.google.com/secret-manager/regional-secrets/create-regional-secret?hl=ja)
+
+### 9.2 プロトタイプ（この Runbook の範囲）
+
+- **グローバルシークレット（自動レプリケーション）**でよい。CLI から `gcloud secrets describe <id>` で確認しやすく、Cloud Run の **`--set-secrets`（環境変数としてマウント）**とも整合しやすい。
+- **注意:** Cloud Run のサービス設定としては、公式ドキュメントの制限に **「Regional secrets はサポートしない」** とある（[Configure secrets for services](https://cloud.google.com/run/docs/configuring/services/secrets) の Limitations）。そのため、プロトタイプのデプロイは **リージョンシークレットに依存しない**前提が安全。
+
+### 9.3 本番（実運用）で「東京リージョンに閉じたい」場合の未決事項（要実装）
+
+実運用では **データ所在地を東京に寄せたい**要件が出ることが多く、その場合 **東京のリージョンシークレット**を使いたくなる。ただし現状は少なくとも **Cloud Run のネイティブな `--set-secrets` だけではリージョンシークレットを前提にできない**（上記公式制限）ため、本番向けには例えば次のような **別実装**が必要になる可能性が高い（要調査・設計）。
+
+- アプリ起動時または実行時に **リージョンエンドポイントの Secret Manager API** でシークレットを取得し、環境変数へ載せ替える（Workload Identity / サービスアカウント権限の設計が別途必要）
+- あるいは **Cloud Run 側の機能拡張・制限緩和**を待つ、など
+
+**記録用の結論:** プロトタイプは **グローバルシークレットで進める**。本番では **東京リージョン要件を満たすためのシークレット取得経路をアプリ／インフラ側で実装する**タスクを別途起こす（この Runbook だけでは完結しない）。
 
