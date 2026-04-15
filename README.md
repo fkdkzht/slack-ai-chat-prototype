@@ -34,7 +34,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-2. `.env.example` を `.env` にコピーし、値を埋める。
+2. `.env.example` を `.env` にコピーし、値を埋める（**ローカルで詳細ログを出すなら `APP_ENV=dev`**）。
 
 ```bash
 cp .env.example .env
