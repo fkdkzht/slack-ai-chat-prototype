@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     gemini_api_key: str
     gemini_model: str = "gemini-2.5-flash"
 
+    # Demo-only switches
+    demo_mode: bool = False
+    gemini_filter_model: str = "gemini-2.5-flash"
+    gemini_chat_model: str = "gemini-2.5-flash"
+    sheets_webhook_url: str | None = None
+
 
 def get_settings() -> Settings:
     return Settings()

@@ -135,6 +135,8 @@ export REGION="asia-northeast1"
 
 > アプリ実装が入ったら、リポジトリルートで実行。
 
+**デモ安定化メモ（重要）:** 本アプリは Slack の再送を避けるために **イベント受信を即 2xx で ack** し、重い処理は **バックグラウンド**で継続する。Cloud Run はアイドル時に CPU が絞られることがあるため、**デモでは `--no-cpu-throttling` を付ける**と、返信作成などの処理が **待機中でも継続しやすく**なる（その分、アイドル時も CPU 課金が発生しやすいので、デモ用途に限定して使う）。
+
 ```bash
 gcloud run deploy slack-ai-chat-prototype \
   --source . \
@@ -142,6 +144,7 @@ gcloud run deploy slack-ai-chat-prototype \
   --allow-unauthenticated \
   --memory=512Mi \
   --cpu=1 \
+  --no-cpu-throttling \
   --min-instances=0 \
   --max-instances=2 \
   --set-env-vars="APP_ENV=prod,GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=default,SESSION_TTL_HOURS=24,GEMINI_MODEL=gemini-2.5-flash" \
@@ -178,6 +181,74 @@ UI（最短）:
 ---
 
 ## 7. 動作確認（デモ当日チェックリスト）
+
+### 7.0 （デモ用）Spreadsheet ログ可視化の準備（Apps Script Webhook）
+
+> Cloud Run 側に Google API の資格情報を持たせずに、Apps Script を Webhook として使う。
+
+1. Google Drive で Apps Script を新規作成（例: `slack-ai-chat-demo-sheets-webhook`）
+2. `Code.gs` に以下を貼り付けて保存
+
+```javascript
+const PROP_KEY = "SPREADSHEET_ID";
+
+function _getOrCreateSpreadsheetId_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(PROP_KEY);
+  if (id) return id;
+
+  const ss = SpreadsheetApp.create("slack-ai-chat demo export");
+  const dict = ss.getActiveSheet();
+  dict.setName("pii_dictionary");
+  dict.appendRow(["ts", "event_id", "pii_type", "token", "value"]);
+
+  const log = ss.insertSheet("message_log");
+  log.appendRow(["ts", "event_id", "sanitized_text", "pii_summary_json"]);
+
+  props.setProperty(PROP_KEY, ss.getId());
+  return ss.getId();
+}
+
+function doPost(e) {
+  const ssId = _getOrCreateSpreadsheetId_();
+  const ss = SpreadsheetApp.openById(ssId);
+
+  const payload = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+  const messageLog = payload.message_log;
+  const piiDict = payload.pii_dictionary || [];
+
+  if (messageLog) {
+    const sheet = ss.getSheetByName("message_log");
+    sheet.appendRow([
+      messageLog.ts || "",
+      messageLog.event_id || "",
+      messageLog.sanitized_text || "",
+      messageLog.pii_summary_json || "",
+    ]);
+  }
+
+  if (Array.isArray(piiDict) && piiDict.length) {
+    const sheet = ss.getSheetByName("pii_dictionary");
+    piiDict.forEach((r) => {
+      sheet.appendRow([r.ts || "", r.event_id || "", r.pii_type || "", r.token || "", r.value || ""]);
+    });
+  }
+
+  return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
+}
+```
+
+3. Deploy → New deployment → Type: Web app
+   - Execute as: Me
+   - Who has access: Anyone（デモ用途。可能なら domain 内に限定）
+4. Web app URL を控えて、Cloud Run の環境変数 `SHEETS_WEBHOOK_URL` に設定する
+5. `curl` で疎通確認（レスポンスが `ok` になり、Spreadsheet が自動作成される）
+
+```bash
+curl -sS -X POST "$SHEETS_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"message_log":{"ts":"1","event_id":"E1","sanitized_text":"hi <EMAIL_1>","pii_summary_json":"{\"EMAIL\":1}"},"pii_dictionary":[{"ts":"1","event_id":"E1","pii_type":"EMAIL","token":"<EMAIL_1>","value":"alice@example.com"}]}'
+```
 
 - Cloud Run の **`/health`** が 200 を返す（`*.run.app` では小文字の `/healthz` が Google フロントで 404 になることがあるため）
 - Slack でボットにDMを送る
