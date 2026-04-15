@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from google import genai
+
+class _GenAiProxy:
+    Client = None
+
+
+genai = _GenAiProxy()
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,11 @@ def parse_filter_json(text: str) -> FilterResult:
 
 
 def run_gemini_filter(api_key: str, model: str, raw_text: str) -> FilterResult:
+    if genai.Client is None:
+        from google import genai as _real_genai
+
+        genai.Client = _real_genai.Client
+
     client = genai.Client(api_key=api_key)
     prompt = (
         "You are a PII redaction filter.\n"
