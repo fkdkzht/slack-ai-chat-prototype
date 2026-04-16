@@ -65,7 +65,12 @@ def _process_slack_message_event(
         chat_model = settings.gemini_chat_model if settings.demo_mode else settings.gemini_model
 
         def gen_fn(messages: list[dict[str, str]]) -> str:
-            return generate_reply(api_key=settings.gemini_api_key, model=chat_model, messages=messages)
+            return generate_reply(
+                api_key=settings.gemini_api_key,
+                model=chat_model,
+                messages=messages,
+                allow_web_search=bool(settings.demo_mode),
+            )
 
         filter_fn = None
         export_hook = None
