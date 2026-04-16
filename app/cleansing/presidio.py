@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
+
+# Presidio's EMAIL_ADDRESS recognizer uses `tldextract`, which by default writes to `~/.cache`.
+# In sandboxed/test environments that can be disallowed, so default to a workspace-local path.
+if "TLDEXTRACT_CACHE" not in os.environ:
+    repo_root = Path(__file__).resolve().parents[2]
+    cache_dir = repo_root / ".cache" / "tldextract"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["TLDEXTRACT_CACHE"] = str(cache_dir)
 
 from presidio_analyzer import AnalyzerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider

@@ -106,6 +106,12 @@ def test_slack_events_event_callback_message_returns_debug_reply() -> None:
     assert posted["thread_ts"] == "1700000000.0001"
     assert "Masked:" in posted["text"]
     assert "alice@example.com" in posted["text"]
+    session_id = "C1:1700000000.0001"
+    saved = fake_store.get(session_id)
+    assert saved is not None
+    assert saved.history
+    joined = "\n".join(m.text for m in saved.history)
+    assert "alice@example.com" not in joined
 
 
 def test_slack_duplicate_event_id_does_not_post_twice() -> None:
@@ -257,6 +263,13 @@ def test_slack_events_demo_mode_filters_and_exports_and_chat_sees_sanitized_only
     assert "<EMAIL_1>" in msg_texts
     assert "alice@example.com" not in msg_texts
     assert chat_calls[0]["model"] == "chat-model"
+    session_id = "C1:1700000000.0002"
+    saved = fake_store.get(session_id)
+    assert saved is not None
+    assert saved.history
+    joined = "\n".join(m.text for m in saved.history)
+    assert "alice@example.com" not in joined
+    assert "<EMAIL_1>" in joined
 
 
 def test_slack_skips_message_from_bot_user() -> None:
