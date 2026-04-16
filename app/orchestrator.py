@@ -31,8 +31,14 @@ def handle_user_message(
         sanitized_text = str(out.get("sanitized_text") or "")
         pii_items = list(out.get("pii_items") or [])
         mask_summary = dict(out.get("summary") or {})
-        # Demo mode: we do not demask via token->value; keep reply as-is
-        mask_map = {}
+        mask_map: dict[str, str] = {}
+        for item in pii_items:
+            if not isinstance(item, dict):
+                continue
+            tok = str(item.get("token") or "")
+            val = str(item.get("value") or "")
+            if tok and val:
+                mask_map[tok] = val
 
         if export_hook is not None:
             export_hook(

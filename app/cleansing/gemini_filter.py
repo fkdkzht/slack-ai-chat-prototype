@@ -83,8 +83,11 @@ def run_gemini_filter(api_key: str, model: str, raw_text: str) -> FilterResult:
     prompt = (
         "You are a PII redaction filter.\n"
         "Return ONLY valid JSON with keys: sanitized_text (string), pii_items (array), summary (object).\n"
-        "Replace PII with tokens like <EMAIL_1>, <PHONE_1>, <PERSON_1>.\n"
-        "pii_items entries: {type, value, token}. summary: {TYPE: count}.\n"
+        "Replace PII with tokens that use Presidio-style type names and a numeric suffix, e.g. "
+        "<EMAIL_ADDRESS_1>, <PHONE_NUMBER_1>, <PERSON_1>, <LOCATION_1>.\n"
+        "pii_items entries: {type, value, token} where type matches the prefix inside the angle brackets "
+        "(e.g. type EMAIL_ADDRESS for token <EMAIL_ADDRESS_1>).\n"
+        "summary: map each type string to an integer count.\n"
         "Do not include any extra commentary.\n"
         "Input:\n"
         f"{raw_text}"
