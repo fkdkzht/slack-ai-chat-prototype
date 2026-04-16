@@ -3,11 +3,57 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 import json
+import re
 
 from app.cleansing.demask import demask_text_policy_p0
 from app.cleansing.presidio import cleanse_text_presidio
 from app.llm.prompt import build_messages
 from app.session.models import SessionMessage, SessionState
+
+
+_PRESIDIO_STYLE_TOKEN_RE = re.compile(r"^<(?P<type>[A-Z0-9_]+)_(?P<idx>\d+)>$")
+
+_PII_TYPE_ALIASES: dict[str, str] = {
+    "EMAIL": "EMAIL_ADDRESS",
+    "PHONE": "PHONE_NUMBER",
+    "DATE_OF_BIRT": "DATE_OF_BIRTH",
+}
+
+
+def _normalize_pii_type(token_type: str) -> str:
+    return _PII_TYPE_ALIASES.get(token_type, token_type)
+
+
+def _normalize_filter_pii_items(
+    pii_items: Any,
+) -> tuple[list[dict[str, str]], dict[str, str], dict[str, int]]:
+    normalized_items: list[dict[str, str]] = []
+    mask_map: dict[str, str] = {}
+    counts: dict[str, int] = {}
+
+    if not isinstance(pii_items, list):
+        return normalized_items, mask_map, {}
+
+    for item in pii_items:
+        if not isinstance(item, dict):
+            continue
+        tok = item.get("token")
+        val = item.get("value")
+        if not isinstance(tok, str) or not isinstance(val, str):
+            continue
+        if not val:
+            continue
+        m = _PRESIDIO_STYLE_TOKEN_RE.match(tok)
+        if m is None:
+            continue
+        pii_type = _normalize_pii_type(m.group("type"))
+
+        normalized_items.append({"type": pii_type, "value": val, "token": tok})
+        mask_map[tok] = val
+        counts[pii_type] = counts.get(pii_type, 0) + 1
+
+    mask_summary = {k: v for k, v in counts.items() if v > 0}
+    return normalized_items, mask_map, mask_summary
 
 
 def handle_user_message(
@@ -29,16 +75,7 @@ def handle_user_message(
     else:
         out = filter_fn(user_text)
         sanitized_text = str(out.get("sanitized_text") or "")
-        pii_items = list(out.get("pii_items") or [])
-        mask_summary = dict(out.get("summary") or {})
-        mask_map: dict[str, str] = {}
-        for item in pii_items:
-            if not isinstance(item, dict):
-                continue
-            tok = str(item.get("token") or "")
-            val = str(item.get("value") or "")
-            if tok and val:
-                mask_map[tok] = val
+        pii_items, mask_map, mask_summary = _normalize_filter_pii_items(out.get("pii_items"))
 
         if export_hook is not None:
             export_hook(

@@ -84,7 +84,10 @@ def test_slack_events_event_callback_message_returns_debug_reply() -> None:
         posted["thread_ts"] = thread_ts
         posted["text"] = text
 
-    def fake_generate_reply(*, api_key: str, model: str, messages: list[dict[str, str]]) -> str:
+    def fake_generate_reply(
+        *, api_key: str, model: str, messages: list[dict[str, str]], allow_web_search: bool = False
+    ) -> str:
+        _ = allow_web_search
         return f"(sanitized) {messages[-1]['content']}"
 
     main_mod.post_thread_reply = fake_post_thread_reply
@@ -221,7 +224,10 @@ def test_slack_events_demo_mode_filters_and_exports_and_chat_sees_sanitized_only
     def fake_post_to_sheets_webhook(*, client, webhook_url: str, payload: dict) -> None:
         sheets_posts.append({"webhook_url": webhook_url, "payload": payload})
 
-    def fake_generate_reply(*, api_key: str, model: str, messages: list[dict[str, str]]) -> str:
+    def fake_generate_reply(
+        *, api_key: str, model: str, messages: list[dict[str, str]], allow_web_search: bool = False
+    ) -> str:
+        _ = allow_web_search
         chat_calls.append({"api_key": api_key, "model": model, "messages": messages})
         return "ok"
 
@@ -252,7 +258,7 @@ def test_slack_events_demo_mode_filters_and_exports_and_chat_sees_sanitized_only
         {
             "ts": "1700000000.0002",
             "event_id": "EvDEMO1",
-            "pii_type": "EMAIL",
+            "pii_type": "EMAIL_ADDRESS",
             "token": "<EMAIL_1>",
             "value": "alice@example.com",
         }

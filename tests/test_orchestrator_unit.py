@@ -126,3 +126,33 @@ def test_filter_path_restores_person_token_in_slack_reply() -> None:
     )
     assert name in reply
     assert "<PERSON_1>" not in reply
+
+
+def test_filter_path_normalizes_summary_and_items_and_suppresses_zeros() -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    state = SessionState(session_id="C:1", created_at=now, updated_at=now, ttl_at=now)
+
+    def fake_filter(_raw_text: str):
+        return {
+            "sanitized_text": "Email <EMAIL_1> / badtok {{EMAIL}}",
+            "pii_items": [
+                {"type": "EMAIL", "value": "alice@example.com", "token": "<EMAIL_1>"},
+                {"type": "EMAIL", "value": "alice@example.com", "token": "{{EMAIL}}"},
+                {"type": "PHONE", "value": "", "token": "<PHONE_1>"},
+            ],
+            "summary": {"EMAIL": 1, "PHONE": 0, "URL": 0},
+        }
+
+    def fake_chat(messages: list[dict[str, str]]) -> str:
+        return messages[-1]["content"]
+
+    _new_state, summary, reply = handle_user_message(
+        state=state,
+        user_text="my email is alice@example.com",
+        user_ts="1",
+        generate_reply_fn=fake_chat,
+        ttl_hours=24,
+        filter_fn=fake_filter,
+    )
+    assert summary == {"EMAIL_ADDRESS": 1}
+    assert "alice@example.com" in reply
