@@ -15,7 +15,11 @@ def post_thread_reply(
 
 
 def format_first_reply(*, mask_summary: dict[str, int], answer_text: str) -> str:
-    parts = [f"{k} x{v}" for k, v in sorted(mask_summary.items())]
-    summary = "Masked: " + (", ".join(parts) if parts else "NONE")
+    items = [(k, v) for k, v in mask_summary.items() if v > 0]
+    if not items:
+        return answer_text
+
+    parts = [f"{k} x{v}" for k, v in sorted(items)]
+    summary = "Masked: " + ", ".join(parts)
     return f"{summary}\n\n{answer_text}"
 
